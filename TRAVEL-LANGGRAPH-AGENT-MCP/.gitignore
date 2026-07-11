@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Local runtime data
+travel_bookings.json
+*.log
+
+# Local Kubernetes secrets
+k8s/02-secret.yaml
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

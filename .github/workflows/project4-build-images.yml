@@ -1,0 +1,93 @@
+name: Build Project4 RAG Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional image tag. Defaults to the commit SHA."
+        required: false
+        default: ""
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "PROJECT4-PROMPT-ENGG-TEXT-TO-SQL-RAG/**"
+      - ".github/workflows/project4-build-images.yml"
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: PROJECT4-PROMPT-ENGG-TEXT-TO-SQL-RAG
+
+jobs:
+  build:
+    name: Build and Push ${{ matrix.service.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: generic-query-executor
+            repository: project4-generic-query-executor
+            dockerfile: 1.generic-query-executor/Dockerfile
+            context: 1.generic-query-executor
+          - name: llm-text-sql-agent
+            repository: project4-llm-text-sql-agent
+            dockerfile: 2.llm-text-sql-agent/Dockerfile
+            context: 2.llm-text-sql-agent
+          - name: chat-assistant
+            repository: project4-chat-assistant
+            dockerfile: 3.chat-assistant/Dockerfile
+            context: 3.chat-assistant
+          - name: rag-document-publisher
+            repository: project4-rag-document-publisher
+            dockerfile: 4.rag-document-publisher/Dockerfile
+            context: .
+          - name: rag-ingestion-service
+            repository: project4-rag-ingestion-service
+            dockerfile: 5.rag-ingestion-service/Dockerfile
+            context: .
+          - name: rag-ingestion-lambda
+            repository: project4-rag-ingestion-lambda
+            dockerfile: 5.rag-ingestion-service/Dockerfile.lambda
+            context: .
+          - name: rag-retriever-service
+            repository: project4-rag-retriever-service
+            dockerfile: 6.rag-retriever-service/Dockerfile
+            context: .
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ matrix.service.repository }}
+          IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${IMAGE_TAG_INPUT:-${GITHUB_SHA}}"
+          IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}"
+
+          docker build \
+            -f "${PROJECT_DIR}/${{ matrix.service.dockerfile }}" \
+            -t "${IMAGE}:${IMAGE_TAG}" \
+            -t "${IMAGE}:latest" \
+            "${PROJECT_DIR}/${{ matrix.service.context }}"
+
+          docker push "${IMAGE}:${IMAGE_TAG}"
+          docker push "${IMAGE}:latest"

@@ -1,0 +1,114 @@
+name: Project4 Publish RAG Docs to S3
+
+on:
+  workflow_dispatch:
+    inputs:
+      s3_bucket:
+        description: "Target S3 bucket. Leave empty to use secret/variable RAG_DOCS_BUCKET."
+        required: false
+        default: ""
+      s3_prefix:
+        description: "Target S3 prefix."
+        required: false
+        default: "business-docs"
+      delete_removed:
+        description: "Delete S3 markdown docs that no longer exist in Git."
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "PROJECT4-PROMPT-ENGG-TEXT-TO-SQL-RAG/rag-docs/**"
+      - ".github/workflows/project4-publish-rag-docs-to-s3.yml"
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: PROJECT4-PROMPT-ENGG-TEXT-TO-SQL-RAG
+  DEFAULT_S3_PREFIX: business-docs
+
+jobs:
+  validate-and-publish:
+    name: Validate and Publish Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install publisher dependencies
+        run: pip install -r "${PROJECT_DIR}/4.rag-document-publisher/requirements.txt"
+
+      - name: Validate RAG docs
+        run: python "${PROJECT_DIR}/4.rag-document-publisher/validate_docs.py" --doc-root "${PROJECT_DIR}/rag-docs"
+
+      - name: Resolve publish settings
+        id: settings
+        env:
+          INPUT_BUCKET: ${{ github.event.inputs.s3_bucket || '' }}
+          INPUT_PREFIX: ${{ github.event.inputs.s3_prefix || '' }}
+          INPUT_DELETE_REMOVED: ${{ github.event.inputs.delete_removed || 'false' }}
+          SECRET_BUCKET: ${{ secrets.RAG_DOCS_BUCKET }}
+          VAR_BUCKET: ${{ vars.RAG_DOCS_BUCKET }}
+          VAR_PREFIX: ${{ vars.RAG_DOCS_PREFIX }}
+        run: |
+          set -euo pipefail
+
+          BUCKET="${INPUT_BUCKET:-${SECRET_BUCKET:-${VAR_BUCKET:-}}}"
+          PREFIX="${INPUT_PREFIX:-${VAR_PREFIX:-${DEFAULT_S3_PREFIX}}}"
+          DELETE_REMOVED="${INPUT_DELETE_REMOVED:-false}"
+
+          if [ -z "${BUCKET}" ]; then
+            echo "S3 bucket is required. Provide workflow input s3_bucket or configure RAG_DOCS_BUCKET as a GitHub secret/variable." >&2
+            exit 1
+          fi
+
+          echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "prefix=${PREFIX}" >> "$GITHUB_OUTPUT"
+          echo "delete_removed=${DELETE_REMOVED}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish docs to S3
+        env:
+          GIT_COMMIT_SHA: ${{ github.sha }}
+          S3_BUCKET: ${{ steps.settings.outputs.bucket }}
+          S3_PREFIX: ${{ steps.settings.outputs.prefix }}
+          DELETE_REMOVED: ${{ steps.settings.outputs.delete_removed }}
+        run: |
+          set -euo pipefail
+
+          DELETE_FLAG=""
+          if [ "${DELETE_REMOVED}" = "true" ]; then
+            DELETE_FLAG="--delete-removed"
+          fi
+
+          python "${PROJECT_DIR}/4.rag-document-publisher/publish_to_s3.py" \
+            --doc-root "${PROJECT_DIR}/rag-docs" \
+            --bucket "${S3_BUCKET}" \
+            --prefix "${S3_PREFIX}" \
+            --manifest-key "manifests/project4-rag-docs-${GITHUB_SHA}.json" \
+            ${DELETE_FLAG}
+
+      - name: Show published S3 location
+        run: |
+          echo "Published docs to s3://${{ steps.settings.outputs.bucket }}/${{ steps.settings.outputs.prefix }}/"
+          echo "Manifest: s3://${{ steps.settings.outputs.bucket }}/manifests/project4-rag-docs-${{ github.sha }}.json"
+

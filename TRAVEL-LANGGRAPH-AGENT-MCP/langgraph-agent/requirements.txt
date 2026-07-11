@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+langchain-openai
+langgraph
+langgraph-checkpoint-postgres
+langchain-community
+google-search-results
+requests
+python-dotenv
+python-dateutil
+psycopg[binary,pool]

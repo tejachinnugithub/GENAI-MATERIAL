@@ -1,0 +1,5 @@
+mcp[cli]>=1.27,<2
+httpx
+starlette
+uvicorn
+

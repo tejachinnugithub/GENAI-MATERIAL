@@ -1,0 +1,130 @@
+name: Build Travel MCP Images to ECR
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "TRAVEL-LANGGRAPH-AGENT-MCP/langgraph-agent/**"
+      - "TRAVEL-LANGGRAPH-AGENT-MCP/travel-mcp-server/**"
+      - ".github/workflows/build-travel-mcp-images.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "TRAVEL-LANGGRAPH-AGENT-MCP/langgraph-agent/**"
+      - "TRAVEL-LANGGRAPH-AGENT-MCP/travel-mcp-server/**"
+      - ".github/workflows/build-travel-mcp-images.yml"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional image tag. Defaults to commit SHA."
+        required: false
+        default: ""
+      push_latest:
+        description: "Also push the latest tag"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: TRAVEL-LANGGRAPH-AGENT-MCP
+
+jobs:
+  build:
+    name: Build ${{ matrix.service.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: langgraph-agent
+            context: langgraph-agent
+            repository: travel-langgraph-agent
+          - name: travel-mcp-server
+            context: travel-mcp-server
+            repository: travel-mcp-server
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: github.event_name != 'pull_request'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve image tag
+        id: image
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_TAG}" ]; then
+            echo "tag=${INPUT_TAG}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "tag=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Ensure ECR repository exists
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+
+          aws ecr describe-repositories --repository-names "${{ matrix.service.repository }}" >/dev/null 2>&1 || \
+            aws ecr create-repository --repository-name "${{ matrix.service.repository }}" >/dev/null
+
+      - name: Build image for pull request
+        if: github.event_name == 'pull_request'
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          docker build \
+            -t "${{ matrix.service.repository }}:${IMAGE_TAG}" \
+            "${PROJECT_DIR}/${{ matrix.service.context }}"
+
+      - name: Build image for ECR
+        if: github.event_name != 'pull_request'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          docker build \
+            -t "${ECR_REGISTRY}/${{ matrix.service.repository }}:${IMAGE_TAG}" \
+            -t "${ECR_REGISTRY}/${{ matrix.service.repository }}:latest" \
+            "${PROJECT_DIR}/${{ matrix.service.context }}"
+
+      - name: Push image to ECR
+        if: github.event_name != 'pull_request'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+
+          PUSH_LATEST="${PUSH_LATEST:-true}"
+
+          docker push "${ECR_REGISTRY}/${{ matrix.service.repository }}:${IMAGE_TAG}"
+          if [ "${PUSH_LATEST}" = "true" ]; then
+            docker push "${ECR_REGISTRY}/${{ matrix.service.repository }}:latest"
+          fi

@@ -312,6 +312,51 @@ AWS_GITHUB_ACTIONS_ROLE_ARN
 
 The S3 bucket should have versioning enabled.
 
+### Project4 Docs To S3 Workflow
+
+Workflow file:
+
+```text
+.github/workflows/project4-publish-rag-docs-to-s3.yml
+```
+
+This workflow only publishes RAG documents to S3. It does not deploy Lambda and does not call Pinecone.
+
+Triggers:
+
+- Manual run from GitHub Actions.
+- Automatic run when `PROJECT4-PROMPT-ENGG-TEXT-TO-SQL-RAG/rag-docs/**` changes on `main` or `master`.
+
+Required GitHub secrets:
+
+```text
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_REGION
+```
+
+Configure the target bucket either as a manual workflow input or as:
+
+```text
+RAG_DOCS_BUCKET
+```
+
+Optional variable:
+
+```text
+RAG_DOCS_PREFIX=business-docs
+```
+
+Manual inputs:
+
+```text
+s3_bucket      Target bucket, optional if RAG_DOCS_BUCKET is configured
+s3_prefix      Target prefix, default business-docs
+delete_removed true/false, default false
+```
+
+Use `delete_removed=true` only when you want S3 to mirror Git and delete markdown files that were removed from `rag-docs/`.
+
 ## S3 Triggered Ingestion
 
 Build and deploy the Lambda image from:
